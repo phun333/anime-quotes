@@ -1,0 +1,17 @@
+# Generated files
+/target/
+/Cargo.lock
+
+# Build artifacts
+**/*.rs.bk
+
+# Editor settings
+.idea/
+.vscode/
+
+# macOS
+.DS_Store
+
+# Logs and caches
+*.log
+tmp/

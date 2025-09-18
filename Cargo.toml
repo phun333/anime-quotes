@@ -1,0 +1,15 @@
+[package]
+name = "test"
+version = "0.1.0"
+description = "anime quotes app"
+authors = ["phun333"]
+license = "MIT"
+edition = "2024"
+
+[dependencies]
+crossterm = "0.28.1"
+ratatui = "0.29.0"
+color-eyre = "0.6.3"
+serde = { version = "1.0", features = ["derive"] }
+toml = "0.8"
+image = { version = "0.25", default-features = false, features = ["png", "jpeg"] }

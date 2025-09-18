@@ -1,0 +1,20 @@
+[[quotes]]
+japanese = "逃げちゃダメだ"
+anime = "Attack on Titan"
+character = "Eren Yeager"
+quote = "If you win, you live. If you lose, you die. If you don't fight, you can't win!"
+image = "assets/aot.jpg"
+
+[[quotes]]
+japanese = "逃げちゃダメだ"
+anime = "One Piece"
+character = "Monkey D. Luffy"
+quote = "I'm gonna be King of the Pirates!"
+image = "assets/one_piece.jpg"
+
+[[quotes]]
+japanese = "逃げちゃダメだ"
+anime = "Naruto"
+character = "Naruto Uzumaki"
+quote = "I won't run away anymore... I won't go back on my word... that is my ninja way!"
+image = "assets/naruto.jpg"
