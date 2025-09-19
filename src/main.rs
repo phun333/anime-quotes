@@ -1,18 +1,18 @@
-use std::fs;
-use std::io;
-
 use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind};
-use image::{GenericImageView, imageops::FilterType};
 use ratatui::{
     DefaultTerminal, Frame,
-    buffer::Buffer,
     layout::Rect,
     style::{Color, Style, Stylize},
     symbols::border,
     text::{Line, Span, Text},
-    widgets::{Block, Paragraph, Widget},
+    widgets::{Block, Paragraph},
+};
+use ratatui_image::{
+    FilterType, Resize, StatefulImage, picker::Picker, protocol::StatefulProtocol,
 };
 use serde::Deserialize;
+use std::fs;
+use std::io;
 
 #[derive(Debug, Deserialize)]
 struct AnimeQuote {
@@ -194,9 +194,28 @@ impl UiConfig {
 struct AsciiSettings {
     base_width: u32,
     char_aspect: f32,
+    #[allow(dead_code)]
     gradient: Vec<char>,
     detail_x: u32,
     detail_y: u32,
+}
+
+impl AsciiSettings {
+    fn target_dimensions(&self) -> (u16, u16) {
+        let width = self.base_width.clamp(1, u16::MAX as u32) as u16;
+        let height = ((self.base_width as f32) * self.char_aspect.max(0.1))
+            .round()
+            .clamp(1.0, u16::MAX as f32) as u16;
+        (width.max(1), height.max(1))
+    }
+
+    fn resize_strategy(&self) -> Resize {
+        if self.detail_x > 1 || self.detail_y > 1 {
+            Resize::Scale(Some(FilterType::CatmullRom))
+        } else {
+            Resize::Fit(Some(FilterType::CatmullRom))
+        }
+    }
 }
 
 impl AsciiConfig {
@@ -312,185 +331,12 @@ fn parse_hex_color(value: &str) -> Option<Color> {
     }
 }
 
-#[derive(Clone, Debug)]
-struct AsciiPixel {
-    ch: char,
-    color: Color,
+struct ImageSlot {
+    protocol: StatefulProtocol,
 }
 
-#[derive(Clone, Debug)]
-struct AsciiArt {
-    pixels: Vec<Vec<AsciiPixel>>,
-}
-
-impl AsciiArt {
-    fn from_image_path(path: &str, settings: &AsciiSettings) -> Result<Self, image::ImageError> {
-        let image = image::open(path)?;
-        let (width, height) = image.dimensions();
-        let base_width = settings.base_width.max(1);
-        let detail_x = settings.detail_x.max(1);
-        let detail_y = settings.detail_y.max(1);
-        let aspect_ratio = height as f32 / width as f32;
-
-        let sample_width = base_width * detail_x;
-        let base_height = ((aspect_ratio * base_width as f32) * settings.char_aspect).max(1.0);
-        let sample_height = (base_height * detail_y as f32).max(1.0).round() as u32;
-
-        let resized =
-            image.resize_exact(sample_width, sample_height.max(1), FilterType::CatmullRom);
-
-        let rgba = resized.to_rgba8();
-        let (width, height) = rgba.dimensions();
-        let width_usize = width as usize;
-        let height_usize = height as usize;
-
-        let mut luminance = vec![vec![0.0; width_usize]; height_usize];
-        let mut colors = vec![vec![(0u8, 0u8, 0u8, 0u8); width_usize]; height_usize];
-
-        for y in 0..height_usize {
-            for x in 0..width_usize {
-                let pixel = rgba.get_pixel(x as u32, y as u32);
-                let r = pixel[0];
-                let g = pixel[1];
-                let b = pixel[2];
-                let a = pixel[3];
-                colors[y][x] = (r, g, b, a);
-                luminance[y][x] = if a < 32 {
-                    1.0
-                } else {
-                    (0.2126 * (r as f32) + 0.7152 * (g as f32) + 0.0722 * (b as f32)) / 255.0
-                };
-            }
-        }
-
-        let mut buffer = luminance.clone();
-        let mut pixels = vec![
-            vec![
-                AsciiPixel {
-                    ch: ' ',
-                    color: Color::Rgb(0, 0, 0),
-                };
-                width_usize
-            ];
-            height_usize
-        ];
-
-        let levels = settings.gradient.len().max(1);
-        let max_index = (levels.saturating_sub(1)) as f32;
-
-        for y in 0..height_usize {
-            if y % 2 == 0 {
-                for x in 0..width_usize {
-                    Self::apply_dither_pixel(
-                        x,
-                        y,
-                        true,
-                        &mut buffer,
-                        &colors,
-                        &mut pixels,
-                        &settings.gradient,
-                        max_index,
-                    );
-                }
-            } else {
-                for x in (0..width_usize).rev() {
-                    Self::apply_dither_pixel(
-                        x,
-                        y,
-                        false,
-                        &mut buffer,
-                        &colors,
-                        &mut pixels,
-                        &settings.gradient,
-                        max_index,
-                    );
-                }
-            }
-        }
-
-        Ok(Self { pixels })
-    }
-
-    fn apply_dither_pixel(
-        x: usize,
-        y: usize,
-        left_to_right: bool,
-        buffer: &mut Vec<Vec<f32>>,
-        colors: &[Vec<(u8, u8, u8, u8)>],
-        pixels: &mut Vec<Vec<AsciiPixel>>,
-        gradient: &[char],
-        max_index: f32,
-    ) {
-        let (r, g, b, a) = colors[y][x];
-        if a < 32 {
-            pixels[y][x] = AsciiPixel {
-                ch: ' ',
-                color: Color::Rgb(r, g, b),
-            };
-            return;
-        }
-
-        let old = buffer[y][x].clamp(0.0, 1.0);
-        let mut index = 0usize;
-        let mut error = 0.0;
-
-        if max_index > 0.0 {
-            let scaled = old * max_index;
-            let clamped = scaled.clamp(0.0, max_index);
-            index = clamped.round() as usize;
-            let new_value = (index as f32) / max_index;
-            error = old - new_value;
-        }
-
-        let safe_index = index.min(gradient.len().saturating_sub(1));
-        let ch = gradient.get(safe_index).copied().unwrap_or(' ');
-        pixels[y][x] = AsciiPixel {
-            ch,
-            color: Color::Rgb(r, g, b),
-        };
-
-        if max_index <= 0.0 {
-            return;
-        }
-
-        let width = buffer[0].len();
-        let height = buffer.len();
-
-        let mut add_error = |nx: isize, ny: isize, weight: f32| {
-            if nx >= 0 && ny >= 0 && (nx as usize) < width && (ny as usize) < height {
-                let cell = &mut buffer[ny as usize][nx as usize];
-                *cell = (*cell + error * weight).clamp(0.0, 1.0);
-            }
-        };
-
-        if left_to_right {
-            add_error(x as isize + 1, y as isize, 7.0 / 16.0);
-            add_error(x as isize - 1, y as isize + 1, 3.0 / 16.0);
-            add_error(x as isize, y as isize + 1, 5.0 / 16.0);
-            add_error(x as isize + 1, y as isize + 1, 1.0 / 16.0);
-        } else {
-            add_error(x as isize - 1, y as isize, 7.0 / 16.0);
-            add_error(x as isize + 1, y as isize + 1, 3.0 / 16.0);
-            add_error(x as isize, y as isize + 1, 5.0 / 16.0);
-            add_error(x as isize - 1, y as isize + 1, 1.0 / 16.0);
-        }
-    }
-
-    fn lines(&self) -> Vec<Line<'static>> {
-        self.pixels
-            .iter()
-            .map(|row| {
-                let spans: Vec<Span<'static>> = row
-                    .iter()
-                    .map(|pixel| {
-                        Span::styled(pixel.ch.to_string(), Style::default().fg(pixel.color))
-                    })
-                    .collect();
-                Line::from(spans)
-            })
-            .collect()
-    }
-}
+const IMAGE_TOP_PADDING: u16 = 2;
+const IMAGE_TEXT_GAP: u16 = 2;
 
 fn main() -> io::Result<()> {
     let mut terminal = ratatui::init();
@@ -499,10 +345,12 @@ fn main() -> io::Result<()> {
     app_result
 }
 
-#[derive(Debug)]
 pub struct App {
     quotes: Vec<AnimeQuote>,
-    ascii_cache: Vec<Option<AsciiArt>>,
+    image_cache: Vec<Option<ImageSlot>>,
+    image_resize: Resize,
+    image_width: u16,
+    image_height: u16,
     palette: Palette,
     show_instructions: bool,
     current_index: usize,
@@ -515,23 +363,41 @@ impl Default for App {
         let ui_config = UiConfig::load_from_file("config.toml");
         let ascii_settings = ui_config.ascii.to_settings();
         let palette = ui_config.colors.to_palette();
-        let ascii_cache = quotes
+        let (image_width, image_height) = ascii_settings.target_dimensions();
+        let image_resize = ascii_settings.resize_strategy();
+
+        let picker = match Picker::from_query_stdio() {
+            Ok(picker) => picker,
+            Err(error) => {
+                eprintln!("failed to detect terminal graphics capabilities: {error}");
+                Picker::from_fontsize((10, 20))
+            }
+        };
+
+        let image_cache = quotes
             .iter()
             .map(|quote| {
-                quote.image.as_deref().and_then(|path| {
-                    match AsciiArt::from_image_path(path, &ascii_settings) {
-                        Ok(art) => Some(art),
+                quote
+                    .image
+                    .as_deref()
+                    .and_then(|path| match image::open(path) {
+                        Ok(image) => {
+                            let protocol = picker.new_resize_protocol(image);
+                            Some(ImageSlot { protocol })
+                        }
                         Err(error) => {
-                            eprintln!("failed to load ascii art from {path}: {error}");
+                            eprintln!("failed to load image from {path}: {error}");
                             None
                         }
-                    }
-                })
+                    })
             })
             .collect();
         Self {
             quotes,
-            ascii_cache,
+            image_cache,
+            image_resize,
+            image_width,
+            image_height,
             palette,
             show_instructions: ui_config.show_instructions,
             current_index: 0,
@@ -555,75 +421,9 @@ impl App {
         Ok(())
     }
 
-    fn draw(&self, frame: &mut Frame) {
-        frame.render_widget(self, frame.area());
-    }
+    fn draw(&mut self, frame: &mut Frame) {
+        let area = frame.area();
 
-    fn handle_events(&mut self) -> io::Result<()> {
-        match event::read()? {
-            Event::Key(key_event) if key_event.kind == KeyEventKind::Press => {
-                self.handle_key_event(key_event)
-            }
-            _ => {}
-        };
-        Ok(())
-    }
-
-    fn handle_key_event(&mut self, key_event: KeyEvent) {
-        match key_event.code {
-            KeyCode::Char('q') => self.exit(),
-            KeyCode::Left => self.previous_quote(),
-            KeyCode::Right => self.next_quote(),
-            _ => {}
-        }
-    }
-
-    fn exit(&mut self) {
-        self.exit = true;
-    }
-
-    fn next_quote(&mut self) {
-        if !self.quotes.is_empty() {
-            self.current_index = (self.current_index + 1) % self.quotes.len();
-        }
-    }
-
-    fn previous_quote(&mut self) {
-        if !self.quotes.is_empty() {
-            self.current_index = if self.current_index == 0 {
-                self.quotes.len() - 1
-            } else {
-                self.current_index - 1
-            };
-        }
-    }
-
-    fn current_ascii_art(&self) -> Option<&AsciiArt> {
-        self.ascii_cache
-            .get(self.current_index)
-            .and_then(|art| art.as_ref())
-    }
-
-    fn current_quote(&self) -> Option<&AnimeQuote> {
-        self.quotes.get(self.current_index)
-    }
-
-    fn instructions_line(&self) -> Line<'static> {
-        let key_style = Style::default().fg(self.palette.instructions).bold();
-        Line::from(vec![
-            Span::raw(" Previous "),
-            Span::styled("<Left>", key_style),
-            Span::raw(" Next "),
-            Span::styled("<Right>", key_style),
-            Span::raw(" Quit "),
-            Span::styled("<Q>", key_style),
-            Span::raw(" "),
-        ])
-    }
-}
-
-impl Widget for &App {
-    fn render(self, area: Rect, buf: &mut Buffer) {
         let title = Line::from(" Anime Quotes ".bold());
         let mut block = Block::bordered()
             .title(title.centered())
@@ -632,12 +432,61 @@ impl Widget for &App {
             block = block.title_bottom(self.instructions_line().centered());
         }
 
-        let mut lines: Vec<Line> = Vec::new();
+        let inner = block.inner(area);
+        frame.render_widget(block, area);
 
-        if let Some(ascii) = self.current_ascii_art() {
-            lines.extend(ascii.lines());
-            lines.push(Line::from(""));
+        if inner.width == 0 || inner.height == 0 {
+            return;
         }
+
+        let reserved_vertical = IMAGE_TOP_PADDING + IMAGE_TEXT_GAP;
+        let available_for_image = inner.height.saturating_sub(reserved_vertical);
+        let image_height = self.image_height.min(available_for_image);
+        let text_height = inner
+            .height
+            .saturating_sub(IMAGE_TOP_PADDING + image_height + IMAGE_TEXT_GAP);
+
+        if image_height > 0 {
+            let image_width = self.image_width.min(inner.width);
+            let image_x = inner.x + (inner.width.saturating_sub(image_width)) / 2;
+            let image_area = Rect {
+                x: image_x,
+                y: inner.y + IMAGE_TOP_PADDING,
+                width: image_width,
+                height: image_height,
+            };
+
+            let resize = self.image_resize.clone();
+            if let Some(slot) = self.current_image_mut() {
+                let widget = StatefulImage::<StatefulProtocol>::new().resize(resize);
+                frame.render_stateful_widget(widget, image_area, &mut slot.protocol);
+                if let Some(result) = slot.protocol.last_encoding_result() {
+                    if let Err(error) = result {
+                        eprintln!("failed to encode image: {error}");
+                    }
+                }
+            } else {
+                let placeholder = Paragraph::new(Text::from(Line::from(Span::styled(
+                    "Image not available",
+                    Style::default().fg(Color::Gray),
+                ))))
+                .alignment(ratatui::layout::Alignment::Center);
+                frame.render_widget(placeholder, image_area);
+            }
+        }
+
+        if text_height == 0 {
+            return;
+        }
+
+        let text_area = Rect {
+            x: inner.x,
+            y: inner.y + IMAGE_TOP_PADDING + image_height + IMAGE_TEXT_GAP,
+            width: inner.width,
+            height: text_height,
+        };
+
+        let mut lines: Vec<Line> = Vec::new();
 
         if let Some(quote) = self.current_quote() {
             let anime_style = Style::default().fg(self.palette.anime).bold();
@@ -683,9 +532,70 @@ impl Widget for &App {
             )));
         }
 
-        Paragraph::new(Text::from(lines))
-            .centered()
-            .block(block)
-            .render(area, buf);
+        let paragraph =
+            Paragraph::new(Text::from(lines)).alignment(ratatui::layout::Alignment::Center);
+        frame.render_widget(paragraph, text_area);
+    }
+
+    fn handle_events(&mut self) -> io::Result<()> {
+        match event::read()? {
+            Event::Key(key_event) if key_event.kind == KeyEventKind::Press => {
+                self.handle_key_event(key_event)
+            }
+            _ => {}
+        };
+        Ok(())
+    }
+
+    fn handle_key_event(&mut self, key_event: KeyEvent) {
+        match key_event.code {
+            KeyCode::Char('q') => self.exit(),
+            KeyCode::Left => self.previous_quote(),
+            KeyCode::Right => self.next_quote(),
+            _ => {}
+        }
+    }
+
+    fn exit(&mut self) {
+        self.exit = true;
+    }
+
+    fn next_quote(&mut self) {
+        if !self.quotes.is_empty() {
+            self.current_index = (self.current_index + 1) % self.quotes.len();
+        }
+    }
+
+    fn previous_quote(&mut self) {
+        if !self.quotes.is_empty() {
+            self.current_index = if self.current_index == 0 {
+                self.quotes.len() - 1
+            } else {
+                self.current_index - 1
+            };
+        }
+    }
+
+    fn current_image_mut(&mut self) -> Option<&mut ImageSlot> {
+        self.image_cache
+            .get_mut(self.current_index)
+            .and_then(|slot| slot.as_mut())
+    }
+
+    fn current_quote(&self) -> Option<&AnimeQuote> {
+        self.quotes.get(self.current_index)
+    }
+
+    fn instructions_line(&self) -> Line<'static> {
+        let key_style = Style::default().fg(self.palette.instructions).bold();
+        Line::from(vec![
+            Span::raw(" Previous "),
+            Span::styled("<Left>", key_style),
+            Span::raw(" Next "),
+            Span::styled("<Right>", key_style),
+            Span::raw(" Quit "),
+            Span::styled("<Q>", key_style),
+            Span::raw(" "),
+        ])
     }
 }
