@@ -17,6 +17,8 @@ use std::io;
 #[derive(Debug, Deserialize)]
 struct AnimeQuote {
     japanese: String,
+    #[serde(default)]
+    romaji: Option<String>,
     anime: String,
     character: String,
     quote: String,
@@ -104,6 +106,8 @@ struct ColorConfig {
     character: String,
     #[serde(default = "default_color_japanese")]
     japanese: String,
+    #[serde(default = "default_color_romaji")]
+    romaji: String,
     #[serde(default = "default_color_quote")]
     quote: String,
     #[serde(default = "default_color_count")]
@@ -118,6 +122,7 @@ impl Default for ColorConfig {
             anime: default_color_anime(),
             character: default_color_character(),
             japanese: default_color_japanese(),
+            romaji: default_color_romaji(),
             quote: default_color_quote(),
             count: default_color_count(),
             instructions: default_color_instructions(),
@@ -159,6 +164,10 @@ fn default_color_character() -> String {
 
 fn default_color_japanese() -> String {
     "green".to_string()
+}
+
+fn default_color_romaji() -> String {
+    "magenta".to_string()
 }
 
 fn default_color_quote() -> String {
@@ -251,6 +260,7 @@ struct Palette {
     anime: Color,
     character: Color,
     japanese: Color,
+    romaji: Color,
     quote: Color,
     count: Color,
     instructions: Color,
@@ -262,6 +272,7 @@ impl Default for Palette {
             anime: Color::Yellow,
             character: Color::Cyan,
             japanese: Color::Green,
+            romaji: Color::Magenta,
             quote: Color::White,
             count: Color::Gray,
             instructions: Color::Blue,
@@ -275,6 +286,7 @@ impl ColorConfig {
             anime: parse_color_or_default(&self.anime, Color::Yellow),
             character: parse_color_or_default(&self.character, Color::Cyan),
             japanese: parse_color_or_default(&self.japanese, Color::Green),
+            romaji: parse_color_or_default(&self.romaji, Color::Magenta),
             quote: parse_color_or_default(&self.quote, Color::White),
             count: parse_color_or_default(&self.count, Color::Gray),
             instructions: parse_color_or_default(&self.instructions, Color::Blue),
@@ -336,7 +348,7 @@ struct ImageSlot {
 }
 
 const IMAGE_TOP_PADDING: u16 = 2;
-const IMAGE_TEXT_GAP: u16 = 2;
+const IMAGE_TEXT_GAP: u16 = 1;
 
 fn main() -> io::Result<()> {
     let mut terminal = ratatui::init();
@@ -492,6 +504,7 @@ impl App {
             let anime_style = Style::default().fg(self.palette.anime).bold();
             let character_style = Style::default().fg(self.palette.character).bold();
             let japanese_style = Style::default().fg(self.palette.japanese).bold();
+            let romaji_style = Style::default().fg(self.palette.romaji);
             let quote_style = Style::default().fg(self.palette.quote).italic();
             let count_style = Style::default().fg(self.palette.count);
 
@@ -509,6 +522,16 @@ impl App {
                     Span::raw("Japanese: "),
                     Span::styled(quote.japanese.clone(), japanese_style),
                 ]),
+            ]);
+
+            if let Some(romaji) = &quote.romaji {
+                lines.push(Line::from(vec![
+                    Span::raw("Romaji: "),
+                    Span::styled(romaji.clone(), romaji_style),
+                ]));
+            }
+
+            lines.extend(vec![
                 Line::from(""),
                 Line::from(vec![
                     Span::raw("\""),

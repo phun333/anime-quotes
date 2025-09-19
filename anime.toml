@@ -1,20 +1,23 @@
 [[quotes]]
-japanese = "逃げちゃダメだ"
+japanese = "戦わなければ勝てない"
 anime = "Attack on Titan"
+romaji = "Tatakawanakereba katenai"
 character = "Eren Yeager"
-quote = "If you win, you live. If you lose, you die. If you don't fight, you can't win!"
+quote = "You can’t win if you don’t fight"
 image = "assets/aot.jpg"
 
 [[quotes]]
-japanese = "逃げちゃダメだ"
+japanese = "海賊王に俺はなる"
 anime = "One Piece"
+romaji = "Kaizokuō ni ore wa naru"
 character = "Monkey D. Luffy"
-quote = "I'm gonna be King of the Pirates!"
+quote = "I’m gonna be king of the pirates"
 image = "assets/one_piece.jpg"
 
 [[quotes]]
-japanese = "逃げちゃダメだ"
+japanese = "まっすぐ自分の言葉は曲げねえ…オレの忍道だ"
 anime = "Naruto"
+romaji = "Massugu jibun no kotoba wa magenee, ore no nindou da"
 character = "Naruto Uzumaki"
-quote = "I won't run away anymore... I won't go back on my word... that is my ninja way!"
+quote = "I won’t go back on my words. That’s my Ninja way"
 image = "assets/naruto.jpg"

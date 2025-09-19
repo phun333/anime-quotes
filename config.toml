@@ -12,6 +12,7 @@ gradient = "$@B%8&WM#*oahkbdpqwmZO0QLCJUYXzcvunxrjft/\\|()1{}[]?-_+~<>i!lI;:,\"^
 anime = "yellow"
 character = "cyan"
 japanese = "green"
+romaji = "magenta"
 quote = "white"
 count = "gray"
 instructions = "blue"
